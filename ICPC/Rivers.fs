@@ -1,16 +1,20 @@
 ﻿namespace Rivers
 module Utils =
-
   open System
 
-  type RiverInfo = {
+  type Info = {
     line_width:int
-    river_length:int
+    length:int
+  }
+
+  type Head = {
+    coord: (int*int)
+    count: int
   }
 
   type SplitOption =
-    | Default
-    | RemoveEmpty
+  | Default
+  | RemoveEmpty
     
   let MAX_WORD_LENGTH, MIN_NUMBER_OF_WORDS = 80, 2
   let WHITESPACE = " "
@@ -19,6 +23,16 @@ module Utils =
     match a>b with
     | true -> a
     | _ -> b
+
+  let maxInfo (a:Info) (b:Info) =
+    match a.length>b.length with
+    | true -> a
+    | _ -> b
+
+  let abs (a:int) =
+    match a<0 with
+    | true -> -1*a
+    | _ -> a
 
   /// Given a char separator and string, it splits it up into List of parts
   let stringSplit (input:string) (separator:char) (splitOption: SplitOption) = 
@@ -85,12 +99,8 @@ module Utils =
         helper t (index+1) coords
     helper words 0 []
 
-  
-  let removeEntryFromList (row, column) coords = 
-    List.filter (fun coordEntry -> coordEntry <> (row, column) ) coords
-
   // Searchs a list with (x,y) coordinate entries, return an adjacent entry to the input
-  let tryFindAdjacentFromList (r, c) coords = 
+  let tryFindAdjacentFromList coords (r, c) = 
     let rec helper candidates entry =
       match candidates, entry=None with
       | [], _ | _, false -> entry
@@ -102,34 +112,85 @@ module Utils =
     let candidates = (row, c-1)::(row, c)::(row, c+1)::[]
     helper candidates None
 
-  let pathfinder coords start = 
-    let rec helper _in _out start =
-      match coords with
-      | [] -> _out
-      | v -> 
-        tryFindAdjacentFromList start _in
+  let merge (a:Head) (b:Head) =
+    let (r0,_), (r1,_) = a.coord, b.coord
+    let _count = (a.count+b.count) - 1
+    match r0>r1 with
+    | true -> { a with count=_count }
+    | false -> { b with count=_count }
 
-    helper coords [] start
+  let appendDistinct key _out = 
+    let predicate entry = entry.coord = key.coord
+    match (List.tryFind predicate _out) with
+    | None -> key::_out
+    | Some v ->
+      match v.count > key.count with
+      | true -> _out
+      | false -> key::(List.filter predicate _out)
 
-  let searchForRivers (lineWidth:int) (words:string list) =
-    let rec helper coords maxLength =
-      match coords with
-      | [] -> maxLength
-      | h::t -> max maxLength (List.length (pathfinder t h))
-      
-    let resizedStrList = reshape lineWidth words
-    let coords = List.rev (flattenListToCoordinates resizedStrList)
-    helper coords 0 
+  // Checks if (x,y) coordinate entries are adjacent to each other
+  let coordsAjacent (r0, c0) (r1, c1) : bool = 
+    let isUnder = abs(r1-r0) = 1 
+    let isAdjacent = abs(c1-c0) = 0 || abs(c1-c0) = 1
+    (isUnder && isAdjacent)
 
+  (*
+     |roses_are_red|
+     |eish*I*like__|*
+     *So, two is the maximum number of adacent items
+  *)
+  let newFlowEntry (entries:(int*int) list) = 
+    let key = List.last entries
+    let length = List.length entries
+    { coord=key; count=length }
 
-  
-  let stringConcatList (words:string list) =
+  let rec updateFlowEntries (key:int*int) (entries:(int*int) list) (_out:Head list) =
+    let predicate key entry = coordsAjacent key.coord entry.coord
+    match _out with
+    | [] -> (newFlowEntry (key::entries))::[]
+    | _ ->
+      let entry = newFlowEntry (key::entries)
+      let root = List.tryFind (predicate entry) _out
+      match root with
+      | None -> appendDistinct entry _out
+      | Some v -> 
+        let newEntry = merge entry v
+        appendDistinct newEntry _out
+
+  let pathfinder coords = 
     let rec helper _in _out =
       match _in with
       | [] -> _out
-      | entry::rest -> 
-        helper rest (stringConcat _out entry)
-    helper words String.Empty
+      | key::rest ->
+        let entries = List.filter (coordsAjacent key) rest
+        let _newOut = updateFlowEntries key entries _out
+        helper rest _newOut
+    helper coords []
+
+  let getLengthOfLongest (words:string list) =
+    let rec helper coords maxLength =
+      match coords with
+      | [] -> maxLength
+      | _ ->
+        let _out = pathfinder coords
+        List.fold (fun count entry -> max entry.count count) maxLength _out
+
+    let coords = List.rev (flattenListToCoordinates words)
+    helper coords 0 
+
+  let searchForRivers (lineWidth:int) (words:string list) =
+    let rec helper width _info =
+      let resized = reshape width words
+      let length = getLengthOfLongest resized
+      let _out = { line_width=width; length=length}::_info
+      match (List.length resized) = 1 with
+      | true -> _out
+      | _ ->helper (width+1) _out
+
+    let _results = helper lineWidth []
+    let _default = { line_width=lineWidth; length=0 }
+    let _max = List.fold (fun a b -> maxInfo a b) _default _results
+    _max.line_width, _max.length
 
   let processInput (input:string) =
     let words = stringSplit input ' ' Default
@@ -147,9 +208,10 @@ module Utils =
     | true -> 
       // TODO -- Finalize the logic
       // let rivers = searchForRivers longestWordLength words
+      Some (searchForRivers longestWordLength words)
       
       // Defaulting with random values
-      Some (1, 5)
+      //Some (1, 5)
 
 //processInput "The Yangtze is the third longest river in Asia and the longest in the world to flow entirely in one country"
 //processInput "When two or more rivers meet at a confluence other than the sea the resulting merged river takes the name of one of those rivers"
