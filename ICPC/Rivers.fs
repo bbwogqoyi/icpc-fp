@@ -164,8 +164,17 @@ module Utils =
       | [] -> _out
       | key::rest ->
         let entries = List.filter (coordsAjacent key) rest
-        let _newOut = updateFlowEntries key entries _out
+        let _newOut = 
+          match (List.length entries) = 2 with
+          | false -> updateFlowEntries key entries _out
+          | _ ->
+            let a::b::_ = entries
+            let _left = updateFlowEntries key [a] _out
+            let _right = updateFlowEntries key [b] _out
+            List.distinct (_left@_right)
+
         helper rest _newOut
+
     let _results = helper coords []
     let maxLen = List.fold (fun len x -> max (List.length x.path) len) 0 _results
     let _reduced = List.filter (fun x -> (List.length x.path)>=maxLen) _results
