@@ -9,7 +9,7 @@ module Utils =
 
   type Head = {
     coord: (int*int)
-    count: int
+    path: (int*int) list
   }
 
   type SplitOption =
@@ -25,7 +25,7 @@ module Utils =
     | _ -> b
 
   let maxInfo (a:Info) (b:Info) =
-    match a.length>b.length with
+    match a.length>=b.length with
     | true -> a
     | _ -> b
 
@@ -114,19 +114,20 @@ module Utils =
 
   let merge (a:Head) (b:Head) =
     let (r0,_), (r1,_) = a.coord, b.coord
-    let _count = (a.count+b.count) - 1
+    let _out = List.sort (List.distinct (a.path@b.path))
     match r0>r1 with
-    | true -> { a with count=_count }
-    | false -> { b with count=_count }
+    | true -> { a with path=_out }
+    | false -> { b with path=_out }
 
   let appendDistinct key _out = 
-    let predicate entry = entry.coord = key.coord
-    match (List.tryFind predicate _out) with
+    let predicate func entry = func entry.coord key.coord
+    match (List.tryFind (predicate (=))  _out) with
     | None -> key::_out
-    | Some v ->
-      match v.count > key.count with
-      | true -> _out
-      | false -> key::(List.filter predicate _out)
+    | Some v -> 
+      let _new = List.distinct (v.path@key.path)
+      let entry = { key with path=_new }
+      let rest = (List.filter (predicate (<>)) _out)
+      entry::rest
 
   // Checks if (x,y) coordinate entries are adjacent to each other
   let coordsAjacent (r0, c0) (r1, c1) : bool = 
@@ -139,10 +140,9 @@ module Utils =
      |eish*I*like__|*
      *So, two is the maximum number of adacent items
   *)
-  let newFlowEntry (entries:(int*int) list) = 
+  let newFlowEntry (entries:(int*int) list) = // --- FIXME ----
     let key = List.last entries
-    let length = List.length entries
-    { coord=key; count=length }
+    { coord=key; path=entries }
 
   let rec updateFlowEntries (key:int*int) (entries:(int*int) list) (_out:Head list) =
     let predicate key entry = coordsAjacent key.coord entry.coord
@@ -155,7 +155,8 @@ module Utils =
       | None -> appendDistinct entry _out
       | Some v -> 
         let newEntry = merge entry v
-        appendDistinct newEntry _out
+        let _newOut = appendDistinct newEntry _out
+        List.filter (fun item -> item.coord <> v.coord) _newOut
 
   let pathfinder coords = 
     let rec helper _in _out =
@@ -165,32 +166,48 @@ module Utils =
         let entries = List.filter (coordsAjacent key) rest
         let _newOut = updateFlowEntries key entries _out
         helper rest _newOut
-    helper coords []
-
+    let _results = helper coords []
+    let maxLen = List.fold (fun len x -> max (List.length x.path) len) 0 _results
+    let _reduced = List.filter (fun x -> (List.length x.path)>=maxLen) _results
+    _reduced
+    
   let getLengthOfLongest (words:string list) =
+    let folder count entry = 
+      max (List.length entry.path) count
+
     let rec helper coords maxLength =
       match coords with
       | [] -> maxLength
       | _ ->
-        let _out = pathfinder coords
-        List.fold (fun count entry -> max entry.count count) maxLength _out
+        let _out = pathfinder coords        
+        List.fold folder maxLength _out
 
     let coords = List.rev (flattenListToCoordinates words)
     helper coords 0 
 
-  let searchForRivers (lineWidth:int) (words:string list) =
-    let rec helper width _info =
+  let searchForRivers (lineWidth:int) (words:string list) (maxWidth:int)=
+    let rec helper width _info _min=
       let resized = reshape width words
       let length = getLengthOfLongest resized
-      let _out = { line_width=width; length=length}::_info
-      match (List.length resized) = 1 with
+      let _out =  
+        match length>_min with 
+        | true -> { line_width=width; length=length}::_info
+        | false -> _info
+      match (List.length resized)<_min || width>=maxWidth with
       | true -> _out
-      | _ ->helper (width+1) _out
-
-    let _results = helper lineWidth []
+      | _ ->helper (width+1) _out (max _min length)
+    let _results = helper lineWidth [] 0
     let _default = { line_width=lineWidth; length=0 }
     let _max = List.fold (fun a b -> maxInfo a b) _default _results
     _max.line_width, _max.length
+
+  //let searchForRivers (lineWidth:int) (words:string list) _ =
+  //  let resized = reshape 23 words
+  //  let length = getLengthOfLongest resized
+  //  length
+  ////  ////let _default = { line_width=lineWidth; length=0 }
+  ////  ////let _max = List.fold (fun a b -> maxInfo a b) _default _results
+  ////  ////_max.line_width, _max.length
 
   let processInput (input:string) =
     let words = stringSplit input ' ' Default
@@ -206,13 +223,8 @@ module Utils =
     match isInputValid with
     | false -> None
     | true -> 
-      // TODO -- Finalize the logic
-      // let rivers = searchForRivers longestWordLength words
-      Some (searchForRivers longestWordLength words)
-      
-      // Defaulting with random values
-      //Some (1, 5)
+      let maxWidth = (String.length input)
+      Some (searchForRivers longestWordLength words maxWidth)
 
 //processInput "The Yangtze is the third longest river in Asia and the longest in the world to flow entirely in one country"
 //processInput "When two or more rivers meet at a confluence other than the sea the resulting merged river takes the name of one of those rivers"
-    
